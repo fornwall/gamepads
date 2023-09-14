@@ -1,0 +1,36 @@
+<!doctype html>
+<html>
+
+<head lang="en">
+  <meta charset="utf-8" />
+  <title>hello-gamepads</title>
+  <style>
+    html,
+    body,
+    canvas {
+      margin: 0px;
+      padding: 0px;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      position: absolute;
+      background: black;
+      z-index: 0;
+    }
+
+    canvas:focus {
+      outline: none;
+    }
+  </style>
+</head>
+
+<body>
+  <canvas id="glcanvas" tabindex="1"></canvas>
+  <script src="https://not-fl3.github.io/miniquad-samples/mq_js_bundle.js"></script>
+  <script src="macroquad-gamepads.js"></script>
+  <script>
+    load("hello_gamepads.wasm");
+  </script>
+</body>
+
+</html>
