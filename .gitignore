@@ -11,6 +11,7 @@ target/
 
 .idea/
 .vscode/
+generated/
 
 site/generated/
 dist/

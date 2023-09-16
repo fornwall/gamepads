@@ -1,600 +1,794 @@
-//! A [macroquad](https://macroquad.rs/) plugin to access connected gamepads in the browser.
+//! Library providing information about connected gamepads.
 //!
-//! There is only one [Gamepads::list] entrypoint function exposed to retrieve information about gamepads.
+//! # Overview
+//! To use `gamepads`, first create a [Gamepads] instance using [Gamepads::new()].
 //!
-//! TODO: Practical usage instructions.
+//! Then, on each tick, run [Gamepads::poll()] to poll gamepad state, followed by
+//! [Gamepads::all()] or [Gamepads::get()] to retrieve information about connected
+//! gamepads. See [Gamepad] for how to access button and axis information on gamepads.
+//!
+//! # Usage
+//! The `gamepads` crate is [on crates.io](https://crates.io/crates/gamepads) and can be
+//! used by adding `gamepads` to your dependencies in your project's `Cargo.toml`.
+//! Or more simply, just run `cargo add gamepads`.
+//!
+//! Here is a complete example that creates a new Rust project, adds a dependency
+//! on `gamepads`, creates the source code printing gamepad information,  and then
+//! runs the program.
+//!
+//! First, create the project in a new directory:
+//!
+//! ```sh
+//! $ mkdir gamepads-example
+//! $ cd gamepads-example
+//! $ cargo init
+//! ```
+//!
+//! Second, add a dependency on `gamepads`:
+//!
+//! ```sh
+//! $ cargo add gamepads
+//! ```
+//!
+//! Third, edit `src/main.rs`. Delete what's there and replace it with this:
 //!
 //! ```
-//! let gamepads = Gamepads::new();
+//! use gamepads::Gamepads;
 //!
-//! loop {
-//!     for gamepad in gamepads.list() {
-//!         for button in gamepad.buttons() {
+//! fn main() {
+//!     let mut gamepads = Gamepads::new();
+//!     loop {
+//!         # break;
+//!         gamepads.poll();
+//!
+//!         for gamepad in gamepads.all() {
+//!             println!("Gamepad id: {:?}", gamepad.id());
+//!             for button in gamepad.all_currently_pressed() {
+//!                 println!("Pressed button: {:?}", button);
+//!             }
+//!             println!("Left thumbstick: {:?}", gamepad.left_stick());
+//!             println!("Right thumbstick: {:?}", gamepad.right_stick());
 //!         }
-//!     }
-//!     // ...
+//!
+//!         std::thread::sleep(std::time::Duration::from_millis(500));
+//!    }
 //! }
 //! ```
 //!
+//! Fourth, run it with `cargo run`:
 //!
-//! TODO: Give overview of specification and browser quirks?
+//! ```sh
+//! $ cargo run
+//! [...]
+//! Gamepad id: GamepadId(0)
+//! Pressed button: ActionRight
+//! Pressed button: ActionTop
+//! Left thumbstick: (0.3252289, -0.98961794)
+//! Right thumbstick: (0.0, 0.0)
+//! ```
 //!
-//! Resources:
-//! * [MDN documentation about the Gamepad API](https://developer.mozilla.org/en-US/docs/Web/API/Gamepad)
-//! * [Gamepad W3C specification](https://w3c.github.io/gamepad/)
-//! * [Gamepad Extensions W3C specification](https://w3c.github.io/gamepad/extensions.html)
+//! # Usage as a macroquad web plugin
+//! See the [documentation in the README](https://github.com/fornwall/gamepads#how-to-use-as-a-macroquad-plugin)
+//! for how to use `gamepads` with `macroquad`.
+//!
+//! # Example showing gamepad iteration
+//!
+//! ```
+//! use gamepads::{Button, Gamepads};
+//!
+//! let mut gamepads = Gamepads::new();
+//!
+//! loop {
+//!     # break;
+//!     gamepads.poll();
+//!
+//!     for gamepad in gamepads.all() {
+//!         // Use just_pressed_buttons() or currently_pressed_buttons().
+//!         for button in gamepad.all_just_pressed() {
+//!             println!("Button just pressed: {button:?}");
+//!             match button {
+//!                 Button::DPadUp => println!("Going up!"),
+//!                 Button::ActionDown => println!("Shooting!"),
+//!                 _ => {}
+//!             }
+//!
+//!             // Individual buttons can be checked using
+//!             // is_just_pressed() / is_currently_pressed():
+//!             if gamepad.is_currently_pressed(Button::FrontLeftLower) {
+//!                 println!("Front left lower button is currently pressed");
+//!             }
+//!         }
+//!         
+//!         println!("Left stick: {:?}", gamepad.left_stick());
+//!         println!("Right stick: {:?}", gamepad.right_stick());
+//!     }
+//! }
+//! ```
+//!
+//! # Example showing gamepad lookup by id and haptic feedback
+//!
+//! ```
+//! use std::collections::HashMap;
+//! use gamepads::{Button, Gamepads, GamepadId};
+//!
+//! struct Player {
+//!     position: (f32, f32),
+//! }
+//!
+//! let mut gamepads = Gamepads::new();
+//! let mut players: HashMap<GamepadId, Player> = HashMap::new();
+//! loop {
+//!     # break;
+//!     gamepads.poll();
+//!
+//!     for gamepad in gamepads.all() {
+//!         if let Some(player) = players.get_mut(&gamepad.id()) {
+//!             player.position.0 += gamepad.left_stick_x();
+//!             player.position.1 += gamepad.left_stick_y();
+//!             if player.position.0.abs() > 10. {
+//!                 // Player has fallen out of map - give haptic feedback.
+//!                 gamepads.rumble(gamepad.id(), 500, 0, 0.4, 0.6);
+//!                 player.position.0 = 0.;
+//!             }
+//!         } else if gamepad.is_currently_pressed(Button::ActionDown) {
+//!             println!("New player joining with gamepad {:?}", gamepad.id());
+//!             players.insert(gamepad.id(), Player { position: (0., 0.) });
+//!         }
+//!     }
+//! }
+//! ```
 
-/// An individual gamepad or other controller, allowing access to information such as button presses, axis positions,
-/// and id.
+#[cfg(feature = "wasm-bindgen")]
+mod wasm_bindgen;
+
+const MAX_GAMEPADS: usize = 8;
+
+/// An individual gamepad allowing access to information about button presses,
+/// thumbstick positions and its gamepad id.
 ///
-/// A Gamepad object can be returned by grabbing any position in the array returned by the [get_gamepads()] method.
-///
-/// See [MDN](https://developer.mozilla.org/en-US/docs/Web/API/Gamepad), the
-/// [Gamepad specification](https://w3c.github.io/gamepad/#gamepad-interface), and the supplemental
-/// [Gamepad Extensions specification](https://w3c.github.io/gamepad/extensions.html#partial-gamepad-interface).
-///
-#[derive(Debug)]
-pub struct Gamepad<'a> {
-    #[cfg(target_family = "wasm")]
-    bytes: &'a [u8],
+/// A gamepad can be obtained using either [Gamepads::all()] to loop through all connected gamepads,
+/// or [Gamepads::get(gamepad_id)](Gamepads::get) to get it by an id.
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct Gamepad {
+    id: GamepadId,
+    connected: bool,
+    pressed_bits: u32,
+    axes: [f32; 4],
     #[cfg(target_family = "wasm")]
     last_pressed_bits: u32,
-    #[cfg(not(target_family = "wasm"))]
-    gilrs_gamepad: gilrs::Gamepad<'a>,
-    #[cfg(not(target_family = "wasm"))]
-    pressed_bits: u32,
     #[cfg(not(target_family = "wasm"))]
     just_pressed_bits: u32,
 }
 
-/// The different type of buttons.
-///
-/// ![Visual representation of a Standard Gamepad layout](https://w3c.github.io/gamepad/standard_gamepad.svg)
-#[derive(Copy, Clone, Debug)]
-pub enum ButtonType {
-    /// 0. Bottom button in right cluster
-    BottomRightCluster,
-    /// 1. Right button in right cluster
-    RightRightCluster,
-    /// 2. Left button in right cluster
-    LeftRightCluster,
-    /// 3. Top button in right cluster
-    TopRightCluster,
-    /// 4. Top left front button
-    TopLeftFront,
-    /// 5. Top right front button
-    TopRightFront,
-    /// 6. Bottom left front button
-    BottomLeftFront,
-    /// 7. Bottom right front button
-    BottomRightFront,
-    /// 8. Left button in center cluster - select/back
-    LeftCenterCluster,
-    /// 9. Right button in center cluster - start/forward
-    RightCenterCluster,
-    /// 10. Left stick pressed button
-    LeftStick,
-    /// 11. Right stick pressed button
-    RightStick,
-    /// 12. Top button in left cluster
-    TopLeftCluster,
-    /// 13. Bottom button in left cluster
-    BottomLeftCluster,
-    /// 14. Left button in left cluster
-    LeftLeftCluster,
-    /// 15. Right button in left cluster
-    RightLeftCluster,
-    /// 16. Center button in center cluster
-    CenterCenterCluster,
+// Assert size of struct Gamepad, which is used by javascript.
+//
+// See https://users.rust-lang.org/t/ensure-that-struct-t-has-size-n-at-compile-time/61108/3
+#[cfg(target_family = "wasm")]
+const _: () = [(); 1][(core::mem::size_of::<Gamepad>() == 28) as usize ^ 1];
+
+impl Gamepad {
+    /// An id unique for each gamepad currently connected to the system.
+    ///
+    /// This can be used to distinguish multiple controllers; a gamepad that is disconnected
+    /// and reconnected will retain the same id.
+    pub const fn id(&self) -> GamepadId {
+        self.id
+    }
+
+    /// The `(x, y)` position of the left thumbstick.
+    ///
+    /// Each component is in the range `[-1.0, 1.0]`, with
+    /// negative values representing down or to the left.
+    pub const fn left_stick(&self) -> (f32, f32) {
+        (self.axes[0], self.axes[1])
+    }
+
+    /// The `x` position of the left thumbstick.
+    ///
+    /// Values are in the range `[-1.0, 1.0]`, with
+    /// negative values representing left.
+    pub const fn left_stick_x(&self) -> f32 {
+        self.axes[0]
+    }
+
+    /// The `y` position of the left thumbstick.
+    ///
+    /// Values are in the range `[-1.0, 1.0]`, with
+    /// negative values representing down.
+    pub const fn left_stick_y(&self) -> f32 {
+        self.axes[1]
+    }
+
+    /// The `(x, y)` position of the right thumbstick.
+    ///
+    /// Each component is in the range `[-1.0, 1.0]`, with
+    /// negative values representing down or to the left.
+    pub const fn right_stick(&self) -> (f32, f32) {
+        (self.axes[2], self.axes[3])
+    }
+
+    /// The `y` position of the right thumbstick.
+    ///
+    /// Values are in the range `[-1.0, 1.0]`, with
+    /// negative values representing left.
+    pub const fn right_stick_x(&self) -> f32 {
+        self.axes[2]
+    }
+
+    /// The `y` position of the right thumbstick.
+    ///
+    /// Values are in the range `[-1.0, 1.0]`, with
+    /// negative values representing down.
+    pub const fn right_stick_y(&self) -> f32 {
+        self.axes[3]
+    }
+
+    /// An iterator over all currently pressed buttons.
+    pub fn all_currently_pressed(&self) -> impl Iterator<Item = Button> + '_ {
+        Button::all().filter(|&t| self.is_currently_pressed(t))
+    }
+
+    /// An iterator over all just pressed buttons.
+    pub fn all_just_pressed(&self) -> impl Iterator<Item = Button> + '_ {
+        Button::all().filter(|&t| self.is_just_pressed(t))
+    }
+
+    /// Check if a button has just been pressed.
+    pub const fn is_just_pressed(&self, button: Button) -> bool {
+        let queried_bit = 1 << (button as u32);
+        #[cfg(target_family = "wasm")]
+        {
+            (self.pressed_bits & queried_bit) != 0 && (self.last_pressed_bits & queried_bit) == 0
+        }
+        #[cfg(not(target_family = "wasm"))]
+        {
+            (self.just_pressed_bits & queried_bit) != 0
+        }
+    }
+
+    /// Check if a button is currently pressed.
+    pub const fn is_currently_pressed(&self, button: Button) -> bool {
+        let queried_bit = 1 << (button as u32);
+        (self.pressed_bits & queried_bit) != 0
+    }
 }
 
-impl ButtonType {
+extern "C" {
+    // Host javascript function.
+    #[cfg(target_family = "wasm")]
+    #[cfg(not(feature = "wasm-bindgen"))]
+    fn getGamepads(data_ptr: *const Gamepad);
+
+    // Host javascript function.
+    #[cfg(target_family = "wasm")]
+    #[cfg(not(feature = "wasm-bindgen"))]
+    fn playEffect(
+        gamepad_id: u8,
+        duration_ms: u32,
+        start_delay_ms: u32,
+        strong_magnitude: f32,
+        weak_magnitude: f32,
+    );
+}
+
+/// Expose crate version information as expected by
+/// https://github.com/not-fl3/miniquad/blob/master/js/gl.js.
+#[cfg(target_family = "wasm")]
+#[no_mangle]
+pub extern "C" fn gamepads_crate_version() -> u32 {
+    let major: u32 = env!("CARGO_PKG_VERSION_MAJOR").parse().unwrap();
+    let minor: u32 = env!("CARGO_PKG_VERSION_MINOR").parse().unwrap();
+    let patch: u32 = env!("CARGO_PKG_VERSION_PATCH").parse().unwrap();
+    (major << 24) + (minor << 16) + patch
+}
+
+/// An opaque gamepad identifier.
+///
+/// Obtained using the [Gamepad::id()] method on a gamepad.
+///
+/// Given a gamepad id, it's possible to get its gamepad state using [Gamepads::get(gamepad_id)](Gamepads::get).
+///
+/// This is a small handle consisting of a single byte.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+pub struct GamepadId(u8);
+
+impl GamepadId {
+    /// The byte value that represents this gamepad id.
+    pub const fn value(self) -> u8 {
+        self.0
+    }
+}
+
+/// Context for obtaining gamepad information.
+///
+/// Construct an instance using [Gamepads::new].
+///
+/// On each tick, update gamepads state using [Gamepads::poll()].
+///
+/// Then use [Gamepads::all()] to list all connected gamepads, or [Gamepads::get(gamepad_id)](Gamepads::get)
+/// to get a gamepad by id.
+pub struct Gamepads {
+    gamepads: [Gamepad; MAX_GAMEPADS],
+    #[cfg(not(target_family = "wasm"))]
+    gilrs_gamepad_ids: [usize; MAX_GAMEPADS],
+    #[cfg(not(target_family = "wasm"))]
+    gilrs_instance: gilrs::Gilrs,
+    #[cfg(not(target_family = "wasm"))]
+    num_connected_pads: u8,
+    #[cfg(not(target_family = "wasm"))]
+    deadzones: [[f32; 4]; MAX_GAMEPADS],
+    #[cfg(not(target_family = "wasm"))]
+    playing_ff_effects: Vec<(gilrs::ff::Effect, u128)>,
+}
+
+impl Gamepads {
+    /// Construct a new gamepads instance.
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
+        let result = Self {
+            gamepads: std::array::from_fn(|idx| Gamepad {
+                id: GamepadId(idx as u8),
+                connected: false,
+                pressed_bits: 0,
+                axes: [0.; 4],
+                #[cfg(target_family = "wasm")]
+                last_pressed_bits: 0,
+                #[cfg(not(target_family = "wasm"))]
+                just_pressed_bits: 0,
+            }),
+            #[cfg(not(target_family = "wasm"))]
+            gilrs_gamepad_ids: [usize::MAX; MAX_GAMEPADS],
+            #[cfg(not(target_family = "wasm"))]
+            gilrs_instance: gilrs::Gilrs::new().unwrap(),
+            #[cfg(not(target_family = "wasm"))]
+            num_connected_pads: 0,
+            #[cfg(not(target_family = "wasm"))]
+            deadzones: [[0.; 4]; MAX_GAMEPADS],
+            #[cfg(not(target_family = "wasm"))]
+            playing_ff_effects: Vec::new(),
+        };
+        let mut result = result;
+        result.poll();
+        #[cfg(not(target_family = "wasm"))]
+        {
+            let gamepad_ids = result
+                .gilrs_instance
+                .gamepads()
+                .map(|(id, g)| (id, g.is_connected()))
+                .collect::<Vec<_>>();
+            for (id, connected) in gamepad_ids {
+                if let Some(p) = result.find_or_insert(id) {
+                    result.gamepads[p].connected = connected;
+                }
+            }
+        }
+        result
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    fn find_or_insert(&mut self, gilrs_gamepad_id: gilrs::GamepadId) -> Option<usize> {
+        for i in 0..MAX_GAMEPADS {
+            if self.gilrs_gamepad_ids[i] == gilrs_gamepad_id.into() {
+                return Some(i);
+            }
+        }
+        if self.num_connected_pads == MAX_GAMEPADS as u8 {
+            None
+        } else {
+            let index = self.num_connected_pads;
+            self.num_connected_pads += 1;
+            self.gilrs_gamepad_ids[index as usize] = gilrs_gamepad_id.into();
+            Some(index as usize)
+        }
+    }
+
+    /// Get a gamepad by id, returning `None` if it is no longer connected.
+    ///
+    /// The gamepad state obtained here will reflect the state the last time [Gamepads::poll()]
+    /// was called.
+    pub fn get(&self, gamepad_id: GamepadId) -> Option<Gamepad> {
+        let pad = self.gamepads[gamepad_id.0 as usize];
+        pad.connected.then_some(pad)
+    }
+
+    /// Retrieve information about all connected gamepads.
+    ///
+    /// The gamepad state obtained here will reflect the state the last time [Gamepads::poll()]
+    /// was called.
+    pub fn all(&self) -> impl Iterator<Item = Gamepad> {
+        self.gamepads.into_iter().filter(|p| p.connected)
+    }
+
+    /// Provide haptic feedback by rumbling the gamepad (if supported).
+    ///
+    /// This is a "dual rumble", where an eccentric rotating mass (ERM) vibration motor in each handle
+    /// of the gamepad. Either motor is capable of vibrating the whole gamepad. The vibration effects
+    /// created by each motor are unequal so that the effects of each can be combined to create more
+    /// complex haptic effects.
+    ///
+    /// # Arguments
+    ///
+    /// * `gamepad_id` - ID of the gamepad to rumble
+    /// * `duration_ms` - Duration of the rumble in milliseconds
+    /// * `start_delay_ms` - Delay of the rumble in milliseconds
+    /// * `strong_magnitude` - The vibration magnitude for the low frequency rumble in the range `[0.0, 1.0]`
+    /// * `weak_magnitude` - The vibration magnitude for the high frequency rumble in the range `[0.0, 1.0]`
+    pub fn rumble(
+        &mut self,
+        gamepad_id: GamepadId,
+        duration_ms: u32,
+        start_delay_ms: u32,
+        strong_magnitude: f32,
+        weak_magnitude: f32,
+    ) {
+        #[cfg(target_family = "wasm")]
+        {
+            #[cfg(not(feature = "wasm-bindgen"))]
+            unsafe {
+                playEffect(
+                    gamepad_id.0,
+                    duration_ms,
+                    start_delay_ms,
+                    strong_magnitude,
+                    weak_magnitude,
+                );
+            }
+            #[cfg(feature = "wasm-bindgen")]
+            wasm_bindgen::play_effect(
+                gamepad_id.0,
+                duration_ms,
+                start_delay_ms,
+                strong_magnitude,
+                weak_magnitude,
+            );
+        }
+        #[cfg(not(target_family = "wasm"))]
+        {
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis();
+
+            // Purge old effects.
+            for i in (0..self.playing_ff_effects.len()).rev() {
+                if self.playing_ff_effects[i].1 < now_ms {
+                    self.playing_ff_effects.swap_remove(i);
+                }
+            }
+
+            let gilrs_gamepad_id = self.gilrs_gamepad_ids[gamepad_id.0 as usize];
+            let gilrs_gamepad_id: gilrs::GamepadId =
+                unsafe { std::mem::transmute(gilrs_gamepad_id) };
+
+            let play_for = gilrs::ff::Ticks::from_ms(duration_ms);
+            let after = gilrs::ff::Ticks::from_ms(start_delay_ms);
+            let scheduling = gilrs::ff::Replay {
+                play_for,
+                after,
+                ..Default::default()
+            };
+
+            let strong_magnitude = (f32::from(u16::MAX) * strong_magnitude).round() as u16;
+            let weak_magnitude = (f32::from(u16::MAX) * weak_magnitude).round() as u16;
+
+            if let Ok(effect) = gilrs::ff::EffectBuilder::new()
+                .add_effect(gilrs::ff::BaseEffect {
+                    kind: gilrs::ff::BaseEffectType::Strong {
+                        magnitude: strong_magnitude,
+                    },
+                    scheduling,
+                    ..Default::default()
+                })
+                .add_effect(gilrs::ff::BaseEffect {
+                    kind: gilrs::ff::BaseEffectType::Weak {
+                        magnitude: weak_magnitude,
+                    },
+                    scheduling,
+                    ..Default::default()
+                })
+                .repeat(gilrs::ff::Repeat::For(play_for + after))
+                .gamepads(&[gilrs_gamepad_id])
+                .finish(&mut self.gilrs_instance)
+            {
+                if effect.play().is_ok() {
+                    // Effects stop playing in drop(), so keep a reference.
+                    let throw_away_at =
+                        now_ms + u128::from(duration_ms) + u128::from(start_delay_ms);
+                    self.playing_ff_effects.push((effect, throw_away_at));
+                }
+            }
+        }
+    }
+
+    /// Update gamepad state.
+    ///
+    /// Should be called on each tick before reading gamepad state.
+    pub fn poll(&mut self) {
+        #[cfg(not(target_family = "wasm"))]
+        {
+            for gamepad in self.gamepads.iter_mut() {
+                gamepad.just_pressed_bits = 0;
+            }
+
+            while let Some(gilrs::Event { id, event, .. }) = self.gilrs_instance.next_event() {
+                match event {
+                    gilrs::EventType::Connected => {
+                        if let Some(gamepad_idx) = self.find_or_insert(id) {
+                            self.gamepads[gamepad_idx].connected = true;
+
+                            for (zone, axis) in [
+                                (0, gilrs::Axis::LeftStickX),
+                                (1, gilrs::Axis::LeftStickY),
+                                (2, gilrs::Axis::RightStickY),
+                                (3, gilrs::Axis::RightStickY),
+                            ] {
+                                if let Some(code) = self.gilrs_instance.gamepad(id).axis_code(axis)
+                                {
+                                    self.deadzones[gamepad_idx][zone] = self
+                                        .gilrs_instance
+                                        .gamepad(id)
+                                        .deadzone(code)
+                                        .unwrap_or_default();
+                                }
+                            }
+                        }
+                    }
+                    gilrs::EventType::Disconnected => {
+                        if let Some(gamepad_idx) = self.find_or_insert(id) {
+                            self.gamepads[gamepad_idx].connected = false;
+                        }
+                    }
+                    gilrs::EventType::ButtonPressed(button, _code) => {
+                        if let Some(gamepad_idx) = self.find_or_insert(id) {
+                            if let Some(b) = Button::from_gilrs(button) {
+                                let bit = 1 << (b as u32);
+                                self.gamepads[gamepad_idx].pressed_bits |= bit;
+                                self.gamepads[gamepad_idx].just_pressed_bits |= bit;
+                            }
+                        }
+                    }
+                    gilrs::EventType::ButtonReleased(button, _code) => {
+                        if let Some(gamepad_idx) = self.find_or_insert(id) {
+                            if let Some(b) = Button::from_gilrs(button) {
+                                let bit = 1 << (b as u32);
+                                self.gamepads[gamepad_idx].pressed_bits &= !bit;
+                            }
+                        }
+                    }
+                    gilrs::EventType::AxisChanged(axis, value, _code) => {
+                        if let Some(gamepad_idx) = self.find_or_insert(id) {
+                            if let Some(axis_idx) = match axis {
+                                gilrs::Axis::LeftStickX => Some(0),
+                                gilrs::Axis::LeftStickY => Some(1),
+                                gilrs::Axis::RightStickX => Some(2),
+                                gilrs::Axis::RightStickY => Some(3),
+                                _ => None,
+                            } {
+                                let deadzone = self.deadzones[gamepad_idx][axis_idx];
+                                self.gamepads[gamepad_idx].axes[axis_idx] =
+                                    if value.abs() < deadzone {
+                                        // Axis values within deadzone are 0:
+                                        0.
+                                    } else {
+                                        // Adjust so that interval of magnitude is [0.0, 1.0]:
+                                        value.signum().mul_add(-deadzone, value) / (1. - deadzone)
+                                    };
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        #[cfg(target_family = "wasm")]
+        {
+            for gamepad in self.gamepads.iter_mut() {
+                gamepad.last_pressed_bits = gamepad.pressed_bits;
+            }
+            #[cfg(not(feature = "wasm-bindgen"))]
+            {
+                let pointer = self.gamepads.as_ptr();
+                unsafe { getGamepads(pointer) }
+            }
+            #[cfg(feature = "wasm-bindgen")]
+            {
+                #![allow(clippy::expect_used)]
+                for gamepad in web_sys::window()
+                    .expect("Unable to get window")
+                    .navigator()
+                    .get_gamepads()
+                    .expect("Unable to get gamepads")
+                    .iter()
+                    .filter(|v| !v.is_null())
+                {
+                    let gamepad = web_sys::Gamepad::from(gamepad);
+                    let mut pressed_bits: u32 = 0;
+                    for (button_idx, button) in gamepad.buttons().iter().enumerate() {
+                        let button = web_sys::GamepadButton::from(button);
+                        if button.pressed() {
+                            pressed_bits |= 1 << (button_idx as u32);
+                        }
+                    }
+                    self.gamepads[gamepad.index() as usize].pressed_bits = pressed_bits;
+                    self.gamepads[gamepad.index() as usize].connected = gamepad.connected();
+                    for (axes_idx, axes_value) in gamepad
+                        .axes()
+                        .iter()
+                        .map(|a| a.as_f64().expect("axes should be numbers"))
+                        .enumerate()
+                    {
+                        self.gamepads[gamepad.index() as usize].axes[axes_idx] =
+                            axes_value as f32 * if axes_idx % 2 == 1 { -1. } else { 1. };
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A button on a gamepad.
+///
+/// Check for the current state of button presses on a gamepad using one of:
+///
+/// - [Gamepad::all_currently_pressed()]
+/// - [Gamepad::all_just_pressed()]
+/// - [Gamepad::is_currently_pressed()]
+/// - [Gamepad::is_just_pressed()]
+///
+/// Different platforms call the buttons different things, see the below pictures for an overview, as
+/// well as the individual button documentations for a comparison.
+///
+/// # Playstation
+/// ![Playstation gamepad layout](https://www.gran-turismo.com/images/c/i17AZsIsc9rpTb.jpg)
+///
+/// # Switch
+/// ![Switch gamepad layout](https://oyster.ignimgs.com/mediawiki/apis.ign.com/nintendo-nx/b/bb/Joycon.jpg?width=960)
+///
+/// # Xbox
+/// ![Xbox gamepad layout](https://upload.wikimedia.org/wikipedia/commons/thumb/2/2c/360_controller.svg/2880px-360_controller.svg.png)
+///
+/// # W3C Gamepad API standard gamepad layout:
+/// ![Visual representation of a Standard Gamepad layout](https://w3c.github.io/gamepad/standard_gamepad.svg)
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Button {
+    /// Lowermost button in right cluster
+    ///
+    /// - Playstation: `X`/`Cross` button
+    /// - Switch: `B` button
+    /// - Xbox: `A` button
+    /// - Gamepad API: `buttons[0]` / `Bottom button in right cluster`
+    ActionDown,
+    /// Rightmost button in right cluster
+    ///
+    /// - Gamepad API: `buttons[1]` / `Right button in right cluster`
+    /// - Playstation: `O`/`Circle` button
+    /// - Switch: `A`
+    /// - Xbox: `B`
+    ActionRight,
+    /// Leftmost button in right cluster
+    ///
+    /// - Gamepad API: `buttons[2]` / `Left button in right cluster`
+    /// - Playstation: `□`/`Square`
+    /// - Switch: `Y`
+    /// - Xbox: `X`
+    ActionLeft,
+    /// Topmost button in right cluster
+    ///
+    /// - Gamepad API: `buttons[3]` / `Top button in right cluster`
+    /// - Playstation: `△`/`Triangle`
+    /// - Switch: `X`
+    /// - Xbox: `Y`
+    ActionUp,
+    /// Top left front button
+    ///
+    /// - Gamepad API: `buttons[4]` / `Top left front button`
+    /// - Playstation: `L1`
+    /// - Switch: `L`
+    /// - Xbox: `LB` (`Left Bumper`)
+    FrontLeftUpper,
+    /// Top right front button
+    ///
+    /// - Gamepad API: `buttons[5]` / `Top right front button`
+    /// - Playstation: `R1`
+    /// - Switch: `R`
+    /// - Xbox: `RB` (`Right Bumper`)
+    FrontRightUpper,
+    /// Bottom left front button
+    ///
+    /// - Gamepad API: `buttons[6]` / `Bottom left front button`
+    /// - Playstation: `L2`
+    /// - Switch: `ZL`
+    /// - Xbox: `LT` (`Left Trigger`)
+    FrontLeftLower,
+    /// Bottom right front button
+    ///
+    /// - Gamepad API: `buttons[7]` / `Bottom right front button`
+    /// - Playstation: `R2`
+    /// - Switch: `ZR`
+    /// - Xbox: `RT` (`Right Trigger`)
+    FrontRightLower,
+    /// Left button in center cluster - select/back
+    ///
+    /// - Gamepad API: `buttons[8]` / `Left button in center cluster`
+    /// - Playstation: `SELECT`
+    /// - Switch: `Capture`
+    /// - Xbox: `RT` (`Right Trigger`)
+    LeftCenterCluster,
+    /// Right button in center cluster - start/forward.
+    ///
+    /// - Gamepad API: `buttons[9]` / `Right button in center cluster`
+    /// - Playstation: `Start`
+    /// - Switch: `Home`
+    /// - Xbox: `Start`
+    RightCenterCluster,
+    /// Left stick pressed button.
+    LeftStick,
+    /// Right stick pressed button.
+    RightStick,
+    /// D-pad up button.
+    DPadUp,
+    /// D-pad down button.
+    DPadDown,
+    /// D-pad left button.
+    DPadLeft,
+    /// D-pad right button.
+    DPadRight,
+    /// Mode button.
+    ///
+    /// - Gamepad API: `buttons[16]` / `Center button in center cluster`
+    Mode,
+}
+
+impl Button {
     pub fn all() -> impl Iterator<Item = Self> {
         [
-            Self::BottomRightCluster,
-            Self::RightRightCluster,
-            Self::LeftRightCluster,
-            Self::TopRightCluster,
-            Self::TopLeftFront,
-            Self::TopRightFront,
-            Self::BottomLeftFront,
-            Self::BottomRightFront,
+            Self::ActionDown,
+            Self::ActionRight,
+            Self::ActionLeft,
+            Self::ActionUp,
+            Self::FrontLeftUpper,
+            Self::FrontRightUpper,
+            Self::FrontLeftLower,
+            Self::FrontRightLower,
             Self::LeftCenterCluster,
             Self::RightCenterCluster,
             Self::LeftStick,
             Self::RightStick,
-            Self::TopLeftCluster,
-            Self::BottomLeftCluster,
-            Self::LeftLeftCluster,
-            Self::RightLeftCluster,
-            Self::CenterCenterCluster,
+            Self::DPadUp,
+            Self::DPadDown,
+            Self::DPadLeft,
+            Self::DPadRight,
+            Self::Mode,
         ]
         .into_iter()
     }
 
-    // Compare https://docs.rs/gilrs/latest/gilrs/#controller-layout
-    // and https://www.w3.org/TR/gamepad/#fig-visual-representation-of-a-standard-gamepad-layout
-    /*
     #[cfg(not(target_family = "wasm"))]
-    fn as_gilrs(self) -> gilrs::Button {
-        match self {
-            // Right cluster / Action pad
-            Self::BottomRightCluster => gilrs::Button::South,
-            Self::RightRightCluster => gilrs::Button::East,
-            Self::LeftRightCluster => gilrs::Button::West,
-            Self::TopRightCluster => gilrs::Button::North,
-            // Top buttons
-            Self::TopLeftFront => gilrs::Button::LeftTrigger,
-            Self::TopRightFront => gilrs::Button::RightTrigger,
-            Self::BottomLeftFront => gilrs::Button::LeftTrigger2,
-            Self::BottomRightFront => gilrs::Button::RightTrigger2,
-            // Center (start/select)
-            Self::LeftCenterCluster => gilrs::Button::Select,
-            Self::RightCenterCluster => gilrs::Button::Start,
-            // Sticks pressed.
-            Self::LeftStick => gilrs::Button::LeftThumb,
-            Self::RightStick => gilrs::Button::RightThumb,
-            // Left cluster / d-pad
-            Self::TopLeftCluster => gilrs::Button::DPadUp,
-            Self::BottomLeftCluster => gilrs::Button::DPadDown,
-            Self::LeftLeftCluster => gilrs::Button::DPadLeft,
-            Self::RightLeftCluster => gilrs::Button::DPadRight,
-            // Center button?
-            Self::CenterCenterCluster => gilrs::Button::Mode,
-        }
-    }
-    */
-
-    #[cfg(not(target_family = "wasm"))]
-    fn from_gilrs(button: gilrs::Button) -> Option<Self> {
+    const fn from_gilrs(button: gilrs::Button) -> Option<Self> {
         Some(match button {
-            // Right cluster / Action pad
-            gilrs::Button::South => Self::BottomRightCluster,
-            gilrs::Button::East => Self::RightRightCluster,
-            gilrs::Button::West => Self::LeftRightCluster,
-            gilrs::Button::North => Self::TopRightCluster,
-            // Top buttons
-            gilrs::Button::LeftTrigger => Self::TopLeftFront,
-            gilrs::Button::RightTrigger => Self::TopRightFront,
-            gilrs::Button::LeftTrigger2 => Self::BottomLeftFront,
-            gilrs::Button::RightTrigger2 => Self::BottomRightFront,
-            // Center (start/select)
+            gilrs::Button::South => Self::ActionDown,
+            gilrs::Button::East => Self::ActionRight,
+            gilrs::Button::West => Self::ActionLeft,
+            gilrs::Button::North => Self::ActionUp,
+            gilrs::Button::LeftTrigger => Self::FrontLeftUpper,
+            gilrs::Button::RightTrigger => Self::FrontRightUpper,
+            gilrs::Button::LeftTrigger2 => Self::FrontLeftLower,
+            gilrs::Button::RightTrigger2 => Self::FrontRightLower,
             gilrs::Button::Select => Self::LeftCenterCluster,
             gilrs::Button::Start => Self::RightCenterCluster,
-            // Sticks pressed.
             gilrs::Button::LeftThumb => Self::LeftStick,
             gilrs::Button::RightThumb => Self::RightStick,
-            // Left cluster / d-pad
-            gilrs::Button::DPadUp => Self::TopLeftCluster,
-            gilrs::Button::DPadDown => Self::BottomLeftCluster,
-            gilrs::Button::DPadLeft => Self::LeftLeftCluster,
-            gilrs::Button::DPadRight => Self::RightLeftCluster,
-            // Center button?
-            gilrs::Button::Mode => Self::CenterCenterCluster,
+            gilrs::Button::DPadUp => Self::DPadUp,
+            gilrs::Button::DPadDown => Self::DPadDown,
+            gilrs::Button::DPadLeft => Self::DPadLeft,
+            gilrs::Button::DPadRight => Self::DPadRight,
+            gilrs::Button::Mode => Self::Mode,
             // Other:
             _ => {
                 return None;
             }
         })
-    }
-}
-
-/// Defines an individual button of a gamepad or other controller, allowing access to the current state of different
-/// types of buttons available on the control device.
-///
-/// A `GamepadButton` object is returned by querying any value of the array returned by the [Gamepad::buttons] property
-/// of the Gamepad interface.
-#[derive(Debug, Clone, Copy)]
-#[repr(C)]
-pub struct GamepadButton {
-    /// A boolean indicating whether the button is currently pressed (`true`) or unpressed (`false`).
-    pub pressed: bool,
-
-    /// A boolean indicating whether a button capable of detecting touch is currently touched (`true`) or not
-    /// touched (`false`).
-    ///
-    /// If the button is not capable of detecting touch but can return an analog value, the property will be true if
-    /// the value is greater than `0`, and false otherwise. If the button is not capable of detecting touch and can
-    /// only report a digital value, then it should mirror the [Self::pressed] property.
-    pub touched: bool,
-
-    /// The current state of analog buttons on many modern gamepads, such as the triggers.
-    ///
-    /// Values are normalized to the range `0.0` — `1.0`, with `0.0` representing a button that is not pressed, and
-    /// `1.0` representing a button that is fully pressed.
-    pub value: f32,
-}
-
-/// What hand the controller is being held in, or is most likely to be held in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GamepadHand {
-    /// The left hand.
-    Left,
-    /// If the neither left or right is applicable - the controller is held in both hands or would be fine in either.
-    None,
-}
-
-/// Hardware in the controller designed to provide haptic feedback to the user, most commonly vibration hardware.
-///
-/// This interface is accessible through the [Gamepad::hapticActuators] property.
-///
-/// See [MDN](https://developer.mozilla.org/en-US/docs/Web/API/GamepadHapticActuator) and the
-/// [Gamepad Extensions specification](https://w3c.github.io/gamepad/extensions.html#dom-gamepadhapticactuator).
-#[derive(Debug)]
-pub struct GamepadHapticActuator {}
-
-impl GamepadHapticActuator {
-    /// Makes the hardware pulse at a certain intensity for a specified duration.
-    /// TODO: duration type
-    ///
-    /// # Arguments
-    ///
-    /// * `value` - The intensity of the pulse. This can vary depending on the hardware type, but generally takes a
-    ///   value between `0.0` (no intensity) and `1.0` (full intensity).
-    /// * `duration` - The duration of the pulse in milliseconds.
-    pub fn pulse(_value: f64, _duration: u32) {}
-}
-
-extern "C" {
-    /// Provided by the miniquad-gamepads.js plugin.
-    #[cfg(target_family = "wasm")]
-    fn getGamepads(data_ptr: *const u8, max_length: usize) -> i32;
-
-    /// Log function provided by miniquad in gl.js.
-    #[cfg(target_family = "wasm")]
-    fn console_log(msg: *const ::std::os::raw::c_char);
-}
-
-/// Debug log function.
-pub fn log(output: &str) {
-    #[cfg(target_family = "wasm")]
-    {
-        use std::ffi::CString;
-        let c_string = CString::new(output).unwrap();
-        unsafe {
-            console_log(c_string.as_ptr());
-        }
-    }
-    #[cfg(not(target_family = "wasm"))]
-    {
-        println!("{}", output);
-    }
-}
-
-/// Expected by gl.js in miniquad.
-#[cfg(target_family = "wasm")]
-#[no_mangle]
-pub extern "C" fn gamepads_crate_version() -> u32 {
-    let major_version = 0; // (crate_version >> 24) & 0xff;
-    let minor_version = 1; // (crate_version >> 16) & 0xff;
-    let patch_version = 0; // crate_version & 0xffff;
-    (major_version << 24) + (minor_version << 16) + patch_version
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct GamepadId(usize);
-
-impl<'a> Gamepad<'a> {
-    #[cfg(target_family = "wasm")]
-    const NUM_AXES: usize = 4;
-    //const NUM_BUTTONS: usize = 17;
-
-    /// An integer that is auto-incremented to be unique for each device currently connected to the system
-    ///
-    /// This can be used to distinguish multiple controllers; a gamepad that is disconnected and reconnected will
-    /// retain the same index.
-    ///
-    /// See [MDN](https://developer.mozilla.org/en-US/docs/Web/API/Gamepad/index) and the
-    /// [Gamepad specification](https://w3c.github.io/gamepad/#dom-gamepad-index).
-    pub fn id(&self) -> GamepadId {
-        #[cfg(target_family = "wasm")]
-        {
-            GamepadId(self.bytes[0] as usize)
-        }
-        #[cfg(not(target_family = "wasm"))]
-        {
-            GamepadId(self.gilrs_gamepad.id().into())
-        }
-    }
-
-    /// An array representing the controls with axes present on the device (e.g. analog thumb sticks).
-    ///
-    /// Each entry in the array is a floating point value in the range -1.0 – 1.0, representing the axis position from
-    /// the lowest value (-1.0) to the highest value (1.0).
-    ///
-    /// If the controller is perpendicular to the ground with the directional stick pointing up, -1.0 SHOULD correspond
-    /// to "forward" or "left", and 1.0 SHOULD correspond to "backward" or "right".
-    /// Axes that are drawn from a 2D input device SHOULD appear next to each other in the axes array, X then Y. It is
-    /// RECOMMENDED that axes appear in decreasing order of importance, such that element 0 and 1 typically represent
-    /// the X and Y axis of a directional stick.
-    ///
-    /// See [MDN](https://developer.mozilla.org/en-US/docs/Web/API/Gamepad/axes) and the
-    /// [Gamepad specification](https://w3c.github.io/gamepad/#dom-gamepad-axes).
-    pub fn axes(&self) -> [f32; 4] {
-        #[cfg(target_family = "wasm")]
-        {
-            let bytes_offset = 4;
-            let bytes_length = Self::NUM_AXES * std::mem::size_of::<f32>();
-            let bytes_slice = &self.bytes[bytes_offset..(bytes_offset + bytes_length)];
-            let bytes_ptr = bytes_slice.as_ptr() as *const f32;
-            let slice = unsafe { std::slice::from_raw_parts(bytes_ptr, Self::NUM_AXES) };
-            slice.try_into().unwrap()
-        }
-        #[cfg(not(target_family = "wasm"))]
-        {
-            let a = self
-                .gilrs_gamepad
-                .axis_data(gilrs::Axis::LeftStickX)
-                .map(gilrs::ev::state::AxisData::value)
-                .unwrap_or_default();
-            let b = -self
-                .gilrs_gamepad
-                .axis_data(gilrs::Axis::LeftStickY)
-                .map(gilrs::ev::state::AxisData::value)
-                .unwrap_or_default();
-            let c = self
-                .gilrs_gamepad
-                .axis_data(gilrs::Axis::RightStickX)
-                .map(gilrs::ev::state::AxisData::value)
-                .unwrap_or_default();
-            let d = -self
-                .gilrs_gamepad
-                .axis_data(gilrs::Axis::RightStickY)
-                .map(gilrs::ev::state::AxisData::value)
-                .unwrap_or_default();
-            [a, b, c, d]
-        }
-    }
-
-    /// Objects representing the buttons present on the device.
-    ///
-    /// See [MDN](https://developer.mozilla.org/en-US/docs/Web/API/Gamepad/buttons) and the
-    /// [Gamepad specification](https://w3c.github.io/gamepad/#dom-gamepad-buttons).
-    pub fn buttons(&self) -> impl Iterator<Item = bool> + '_ {
-        #[cfg(target_family = "wasm")]
-        {
-            let bytes_offset = 4 + Self::NUM_AXES * std::mem::size_of::<f32>();
-            let pressed_bits = u32::from_le_bytes([
-                self.bytes[bytes_offset],
-                self.bytes[bytes_offset + 1],
-                self.bytes[bytes_offset + 2],
-                self.bytes[bytes_offset + 3],
-            ]);
-            let mut count = 0;
-            std::iter::from_fn(move || {
-                let result = if count == 17 {
-                    None
-                } else {
-                    Some((pressed_bits & (1 << count)) != 0)
-                };
-                count += 1;
-                result
-            })
-        }
-        #[cfg(not(target_family = "wasm"))]
-        {
-            ButtonType::all().map(|t| self.is_pressed(t))
-        }
-    }
-
-    pub fn just_pressed(&self, button_type: ButtonType) -> bool {
-        #[cfg(target_family = "wasm")]
-        {
-            // TODO: JUST pressed
-            let bytes_offset = 4 + Self::NUM_AXES * std::mem::size_of::<f32>();
-            let pressed_bits = u32::from_le_bytes([
-                self.bytes[bytes_offset],
-                self.bytes[bytes_offset + 1],
-                self.bytes[bytes_offset + 2],
-                self.bytes[bytes_offset + 3],
-            ]);
-            // Just pressed positioned directly after:
-            let queried_bit = 1 << (button_type as u32);
-            (pressed_bits & queried_bit) != 0 && (self.last_pressed_bits & queried_bit) == 0
-        }
-        #[cfg(not(target_family = "wasm"))]
-        {
-            (self.just_pressed_bits & (1 << (button_type as u32))) != 0
-        }
-    }
-
-    pub fn is_pressed(&self, button_type: ButtonType) -> bool {
-        #[cfg(target_family = "wasm")]
-        {
-            let bytes_offset = 4 + Self::NUM_AXES * std::mem::size_of::<f32>();
-            let pressed_bits = u32::from_le_bytes([
-                self.bytes[bytes_offset],
-                self.bytes[bytes_offset + 1],
-                self.bytes[bytes_offset + 2],
-                self.bytes[bytes_offset + 3],
-            ]);
-            (pressed_bits & (1 << (button_type as u32))) != 0
-        }
-        #[cfg(not(target_family = "wasm"))]
-        {
-            (self.pressed_bits & (1 << (button_type as u32))) != 0
-        }
-    }
-
-    /// A boolean indicating whether the gamepad is still connected to the system.
-    ///
-    /// If the gamepad is connected, the value is `true`; if not, it is `false`.
-    ///
-    /// See [MDN](https://developer.mozilla.org/en-US/docs/Web/API/Gamepad/connected) and the
-    /// [Gamepad specification](https://w3c.github.io/gamepad/#dom-gamepad-connected).
-    pub fn connected(&self) -> bool {
-        #[cfg(target_family = "wasm")]
-        {
-            self.bytes[1] == 1
-        }
-        #[cfg(not(target_family = "wasm"))]
-        {
-            self.gilrs_gamepad.is_connected()
-        }
-    }
-
-    //pub haptic_actuators: Vec<GamepadHapticActuator>,
-}
-
-const MAX_GAMEPADS: usize = 8;
-
-/// Context for obtaining gamepad information.
-///
-/// Construct an instance using [Gamepads::new], then use [Gamepads::list] to list gamepads.
-pub struct Gamepads {
-    #[cfg(target_family = "wasm")]
-    buffer: Vec<u8>,
-    #[cfg(target_family = "wasm")]
-    last_pressed_bits: [u32; MAX_GAMEPADS],
-    #[cfg(not(target_family = "wasm"))]
-    gilrs_instance: gilrs::Gilrs,
-    #[cfg(not(target_family = "wasm"))]
-    num_gamepads: u8,
-    #[cfg(not(target_family = "wasm"))]
-    gamepad_ids: [usize; MAX_GAMEPADS],
-    #[cfg(not(target_family = "wasm"))]
-    pressed_bits: [u32; MAX_GAMEPADS],
-    #[cfg(not(target_family = "wasm"))]
-    just_pressed: [u32; MAX_GAMEPADS],
-}
-
-impl Gamepads {
-    // NOTE: Must match what javascript encoder uses.
-    #[cfg(target_family = "wasm")]
-    const BYTES_PER_GAMEPAD: usize = 256;
-    #[cfg(target_family = "wasm")]
-    const BUFFER_LENGTH: usize = Self::BYTES_PER_GAMEPAD * MAX_GAMEPADS;
-
-    /// Construct a new gamepads instance.
-    #[allow(clippy::new_without_default)]
-    pub fn new() -> Self {
-        assert_eq!(std::mem::size_of::<GamepadButton>(), 8);
-        Self {
-            #[cfg(target_family = "wasm")]
-            buffer: vec![0; Self::BUFFER_LENGTH],
-            #[cfg(target_family = "wasm")]
-            last_pressed_bits: [0; MAX_GAMEPADS],
-            #[cfg(not(target_family = "wasm"))]
-            gilrs_instance: gilrs::Gilrs::new().unwrap(),
-            #[cfg(not(target_family = "wasm"))]
-            num_gamepads: 0,
-            #[cfg(not(target_family = "wasm"))]
-            pressed_bits: [0; MAX_GAMEPADS],
-            #[cfg(not(target_family = "wasm"))]
-            just_pressed: [0; MAX_GAMEPADS],
-            #[cfg(not(target_family = "wasm"))]
-            gamepad_ids: [0; MAX_GAMEPADS],
-        }
-    }
-
-    #[cfg(not(target_family = "wasm"))]
-    fn find_or_insert(&mut self, gilrs_gamepad_id: gilrs::GamepadId) -> Option<usize> {
-        for i in 0..(self.num_gamepads as usize) {
-            if self.gamepad_ids[i] == gilrs_gamepad_id.into() {
-                return Some(i);
-            }
-        }
-        if self.num_gamepads as usize == MAX_GAMEPADS {
-            None
-        } else {
-            let index = self.num_gamepads as usize;
-            self.num_gamepads += 1;
-            self.gamepad_ids[index] = gilrs_gamepad_id.into();
-            Some(index)
-        }
-    }
-
-    #[cfg(not(target_family = "wasm"))]
-    fn try_find(&self, gilrs_gamepad_id: gilrs::GamepadId) -> Option<usize> {
-        (0..(self.num_gamepads as usize)).find(|&i| self.gamepad_ids[i] == gilrs_gamepad_id.into())
-    }
-
-    /// List information about gamepads.
-    pub fn list(&mut self) -> impl Iterator<Item = Gamepad> {
-        #[cfg(target_family = "wasm")]
-        {
-            let pointer = self.buffer.as_ptr();
-            let returned_length = unsafe { getGamepads(pointer, Self::BUFFER_LENGTH) } as usize;
-
-            let buffer = &self.buffer;
-            let last_pressed_bits = &self.last_pressed_bits;
-            let mut count = 0;
-            std::iter::from_fn(move || {
-                let result = if count == returned_length {
-                    None
-                } else {
-                    let bytes_offset = Self::BYTES_PER_GAMEPAD * count;
-                    let bytes_end = bytes_offset + Self::BYTES_PER_GAMEPAD;
-                    Some(Gamepad {
-                        bytes: &buffer[bytes_offset..bytes_end],
-                        last_pressed_bits: last_pressed_bits[count],
-                    })
-                };
-                count += 1;
-                result
-            })
-        }
-        #[cfg(not(target_family = "wasm"))]
-        {
-            while let Some(gilrs::Event { id, event, .. }) = self.gilrs_instance.next_event() {
-                if let Some(gamepad_idx) = self.find_or_insert(id) {
-                    match event {
-                        gilrs::EventType::ButtonPressed(button, _code) => {
-                            if let Some(b) = ButtonType::from_gilrs(button) {
-                                let bit = 1 << (b as u32);
-                                self.pressed_bits[gamepad_idx] |= bit;
-                                self.just_pressed[gamepad_idx] |= bit;
-                            }
-                        }
-                        gilrs::EventType::ButtonReleased(button, _code) => {
-                            if let Some(b) = ButtonType::from_gilrs(button) {
-                                let bit = 1 << (b as u32);
-                                self.pressed_bits[gamepad_idx] &= !bit;
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-
-            let result =
-                self.gilrs_instance
-                    .gamepads()
-                    .filter_map(|(gilrs_gamepad_id, gilrs_gamepad)| {
-                        if let Some(gamepad_idx) = self.try_find(gilrs_gamepad_id) {
-                            Some(Gamepad {
-                                gilrs_gamepad,
-                                pressed_bits: self.pressed_bits[gamepad_idx],
-                                just_pressed_bits: self.just_pressed[gamepad_idx],
-                            })
-                        } else {
-                            None
-                        }
-                    });
-
-            result
-        }
-    }
-
-    pub fn clear(&mut self) {
-        #[cfg(not(target_family = "wasm"))]
-        {
-            self.just_pressed.fill(0);
-        }
-        #[cfg(target_family = "wasm")]
-        {
-            for i in 0..self::MAX_GAMEPADS {
-                let bytes_offset = i * Self::BYTES_PER_GAMEPAD
-                    + 4
-                    + Gamepad::NUM_AXES * std::mem::size_of::<f32>();
-                let pressed_bits = u32::from_le_bytes([
-                    self.buffer[bytes_offset],
-                    self.buffer[bytes_offset + 1],
-                    self.buffer[bytes_offset + 2],
-                    self.buffer[bytes_offset + 3],
-                ]);
-                self.last_pressed_bits[i] = pressed_bits;
-            }
-        }
     }
 }

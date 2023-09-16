@@ -1,15 +1,3 @@
-PACKAGE_NAME = hello_gamepads
-MODE =
-WASM_DIR = debug
-WASM_OPT = wasm-opt --all-features --disable-gc
-ifeq ($(RELEASE),1)
-  MODE = --release
-  WASM_DIR = release
-  WASM_OPT += -O3
-else
-  WASM_OPT += -O1
-endif
-
 CLIPPY_PARAMS = -- \
 	-W clippy::cargo \
 	-W clippy::cast_lossless \
@@ -38,16 +26,3 @@ CLIPPY_PARAMS = -- \
 check:
 	cargo fmt --check
 	cargo clippy $(CLIPPY_PARAMS) --no-deps
-	cargo clippy --target wasm32-unknown-unknown $(CLIPPY_PARAMS) --no-deps
-
-wasm:
-	cargo build --target wasm32-unknown-unknown  $(MODE)
-	$(WASM_OPT) -o $(PACKAGE_NAME).wasm ./target/wasm32-unknown-unknown/$(WASM_DIR)/$(PACKAGE_NAME).wasm
-
-serve-wasm: wasm
-	python3 -m http.server 9000
-
-clean:
-	cargo clean
-
-.PHONY: check run wasm serve-wasm clean

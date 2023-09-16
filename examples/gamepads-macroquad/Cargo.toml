@@ -1,0 +1,9 @@
+[package]
+name = "gamepads-macroquad"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+macroquad = "*"
+gamepads = { path = "../..", default-features = false }

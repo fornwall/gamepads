@@ -1,0 +1,39 @@
+<html>
+  <head>
+    <title>gamepads-wasm-direct</title>
+    <meta content="text/html;charset=utf-8" http-equiv="Content-Type" />
+  </head>
+
+  <body>
+    <h1>gamepads-wasm-direct</h1>
+    <p>Press gamepad buttons and move thumbsticks while inspecting the console log.</p>
+    <script type="module">
+      import registerFunctions from "https://fornwall.github.io/gamepads/js/gamepads-module-0.1.js";
+
+      async function run() {
+        let response = await fetch('gamepads_wasm_direct.wasm');
+        let bytes = await response.arrayBuffer();
+        const importObject = {
+         env: {
+          log_gamepad_state: function(gamepadId, buttons, leftX, leftY, rightX, rightY) {
+            console.log(`Gamepad ${gamepadId}: ${buttons.toString(2)}, leftStick = ${leftX},${leftY}, rightStick = ${rightX},${rightY}`);
+          }
+         }
+        };
+
+        let memoryHolder = {};
+        registerFunctions(importObject, memoryHolder);
+
+        let { instance } = await WebAssembly.instantiate(bytes, importObject);
+
+        memoryHolder.memory = instance.exports.memory;
+
+        setInterval(() => {
+          instance.exports.check_gamepads();
+        }, 500);
+      }
+
+      run();
+    </script>
+  </body>
+</html>

@@ -1,4 +1,4 @@
-PACKAGE_NAME = gamepads
+PACKAGE_NAME = gamepads-macroquad
 MODE =
 WASM_DIR = debug
 WASM_OPT = wasm-opt --all-features --disable-gc
@@ -23,49 +23,31 @@ CLIPPY_PARAMS = -- \
 	-W clippy::match_same_arms \
 	-W clippy::needless_continue \
 	-W clippy::needless_pass_by_value \
-	-W clippy::nursery \
 	-W clippy::option_if_let_else \
-	-W clippy::print_stderr \
-	-W clippy::print_stdout \
 	-W clippy::redundant_closure_for_method_calls \
 	-W clippy::semicolon_if_nothing_returned \
 	-W clippy::similar_names \
 	-W clippy::single_match_else \
 	-W clippy::trivially_copy_pass_by_ref \
 	-W clippy::unnested_or_patterns \
-	-W clippy::unreadable-literal \
 	-W clippy::unseparated-literal-suffix \
-	-A clippy::needless-doctest-main \
+	-A clippy::multiple_crate_versions \
+	-A clippy::wildcard_dependencies \
 	-D warnings
 
 check:
 	cargo fmt --check
 	cargo clippy $(CLIPPY_PARAMS) --no-deps
 	cargo clippy --target wasm32-unknown-unknown $(CLIPPY_PARAMS) --no-deps
-	cargo clippy --target wasm32-unknown-unknown --all-features $(CLIPPY_PARAMS) --no-deps
-	cd examples/hello-gamepads && make
-	cd examples/gamepads-macroquad && make
-	cargo test
-
-run:
-	cargo run $(MODE)
 
 wasm:
 	cargo build --target wasm32-unknown-unknown  $(MODE)
-	$(WASM_OPT) -o $(PACKAGE_NAME).wasm ./target/wasm32-unknown-unknown/$(WASM_DIR)/$(PACKAGE_NAME).wasm
-	cargo build --target wasm32-unknown-unknown --features wasm-bindgen $(MODE)
-	$(WASM_OPT) -o $(PACKAGE_NAME).wasm ./target/wasm32-unknown-unknown/$(WASM_DIR)/$(PACKAGE_NAME).wasm
+	$(WASM_OPT) -o $(PACKAGE_NAME).wasm ../../target/wasm32-unknown-unknown/$(WASM_DIR)/$(PACKAGE_NAME).wasm
 
 serve-wasm: wasm
 	python3 -m http.server 9000
 
-generate-js:
-	cd js && ./generate-js.sh
-
-check-js: generate-js
-	cd js && git diff --exit-code .
-
 clean:
 	cargo clean
 
-.PHONY: check run wasm serve-wasm clean generate-js check-js
+.PHONY: check run wasm serve-wasm clean

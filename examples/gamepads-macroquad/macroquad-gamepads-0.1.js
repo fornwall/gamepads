@@ -1,0 +1,1 @@
+../../js/macroquad-gamepads-0.1.js

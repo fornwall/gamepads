@@ -1,10 +1,8 @@
 [package]
-name = "hello_gamepads"
+name = "hello-gamepads"
 version = "0.1.0"
-authors = ["Fredrik Fornwall <fredrik@fornwall.net>"]
 edition = "2021"
 publish = false
 
 [dependencies]
-macroquad = "*"
 gamepads = { path = "../.." }

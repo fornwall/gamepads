@@ -1,0 +1,11 @@
+[package]
+name = "gamepads-wasm-direct"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+gamepads = { path = "../../", default-features = false }

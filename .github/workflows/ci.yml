@@ -16,7 +16,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
-      - run: sudo apt-get install libasound2-dev
+          targets: wasm32-unknown-unknown
+      - run: sudo apt-get update && sudo apt-get install libasound2-dev libudev-dev
         if: matrix.os == 'ubuntu'
       - run: make
 
@@ -32,6 +33,16 @@ jobs:
       - name: Install wasm-opt
         run: brew update && brew install binaryen
       - run: make wasm
+      - run: cd examples/gamepads-wasm-direct && make
+      - run: cargo install wasm-bindgen-cli
+      - run: cd examples/gamepads-wasm-bindgen && make
+
+  check-js:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - run: npm install uglify-js -g
+      - run: make check-js
 
   actionlint:
     runs-on: ubuntu-latest

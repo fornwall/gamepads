@@ -1,0 +1,21 @@
+<html>
+  <head>
+    <title>gamepads-wasm-bindgen</title>
+    <meta content="text/html;charset=utf-8" http-equiv="Content-Type" />
+  </head>
+
+  <body>
+    <h1>gamepads-wasm-bindgen</h1>
+    <p>Press gamepad buttons and move thumbsticks while inspecting the console log.</p>
+    <script type="module">
+      import init, { check_gamepads } from "./generated/gamepads_wasm_bindgen.js";
+
+      async function run() {
+        await init();
+        check_gamepads();
+      }
+
+      run();
+    </script>
+  </body>
+</html>
