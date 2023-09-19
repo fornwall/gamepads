@@ -138,8 +138,12 @@
 //! }
 //! ```
 
-#[cfg(feature = "wasm-bindgen")]
-mod wasm_bindgen;
+#[cfg(not(target_family = "wasm"))]
+mod backend_gilrs;
+#[cfg(all(target_family = "wasm", feature = "wasm-bindgen"))]
+mod backend_web_bindgen;
+#[cfg(all(target_family = "wasm", not(feature = "wasm-bindgen")))]
+mod backend_web_direct;
 
 const MAX_GAMEPADS: usize = 8;
 
@@ -254,35 +258,6 @@ impl Gamepad {
     }
 }
 
-extern "C" {
-    // Host javascript function.
-    #[cfg(target_family = "wasm")]
-    #[cfg(not(feature = "wasm-bindgen"))]
-    fn getGamepads(data_ptr: *const Gamepad);
-
-    // Host javascript function.
-    #[cfg(target_family = "wasm")]
-    #[cfg(not(feature = "wasm-bindgen"))]
-    fn playEffect(
-        gamepad_id: u8,
-        duration_ms: u32,
-        start_delay_ms: u32,
-        strong_magnitude: f32,
-        weak_magnitude: f32,
-    );
-}
-
-/// Expose crate version information as expected by
-/// https://github.com/not-fl3/miniquad/blob/master/js/gl.js.
-#[cfg(target_family = "wasm")]
-#[no_mangle]
-pub extern "C" fn gamepads_crate_version() -> u32 {
-    let major: u32 = env!("CARGO_PKG_VERSION_MAJOR").parse().unwrap();
-    let minor: u32 = env!("CARGO_PKG_VERSION_MINOR").parse().unwrap();
-    let patch: u32 = env!("CARGO_PKG_VERSION_PATCH").parse().unwrap();
-    (major << 24) + (minor << 16) + patch
-}
-
 /// An opaque gamepad identifier.
 ///
 /// Obtained using the [Gamepad::id()] method on a gamepad.
@@ -327,7 +302,7 @@ impl Gamepads {
     /// Construct a new gamepads instance.
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
-        let result = Self {
+        let mut gamepads = Self {
             gamepads: std::array::from_fn(|idx| Gamepad {
                 id: GamepadId(idx as u8),
                 connected: false,
@@ -349,39 +324,13 @@ impl Gamepads {
             #[cfg(not(target_family = "wasm"))]
             playing_ff_effects: Vec::new(),
         };
-        let mut result = result;
-        result.poll();
-        #[cfg(not(target_family = "wasm"))]
-        {
-            let gamepad_ids = result
-                .gilrs_instance
-                .gamepads()
-                .map(|(id, g)| (id, g.is_connected()))
-                .collect::<Vec<_>>();
-            for (id, connected) in gamepad_ids {
-                if let Some(p) = result.find_or_insert(id) {
-                    result.gamepads[p].connected = connected;
-                }
-            }
-        }
-        result
-    }
 
-    #[cfg(not(target_family = "wasm"))]
-    fn find_or_insert(&mut self, gilrs_gamepad_id: gilrs::GamepadId) -> Option<usize> {
-        for i in 0..MAX_GAMEPADS {
-            if self.gilrs_gamepad_ids[i] == gilrs_gamepad_id.into() {
-                return Some(i);
-            }
-        }
-        if self.num_connected_pads == MAX_GAMEPADS as u8 {
-            None
-        } else {
-            let index = self.num_connected_pads;
-            self.num_connected_pads += 1;
-            self.gilrs_gamepad_ids[index as usize] = gilrs_gamepad_id.into();
-            Some(index as usize)
-        }
+        gamepads.poll();
+
+        #[cfg(not(target_family = "wasm"))]
+        gamepads.setup_initially_connected_gilrs();
+
+        gamepads
     }
 
     /// Get a gamepad by id, returning `None` if it is no longer connected.
@@ -427,7 +376,7 @@ impl Gamepads {
         {
             #[cfg(not(feature = "wasm-bindgen"))]
             unsafe {
-                playEffect(
+                backend_web_direct::playEffect(
                     gamepad_id.0,
                     duration_ms,
                     start_delay_ms,
@@ -436,7 +385,7 @@ impl Gamepads {
                 );
             }
             #[cfg(feature = "wasm-bindgen")]
-            wasm_bindgen::play_effect(
+            backend_web_bindgen::play_effect(
                 gamepad_id.0,
                 duration_ms,
                 start_delay_ms,
@@ -446,59 +395,13 @@ impl Gamepads {
         }
         #[cfg(not(target_family = "wasm"))]
         {
-            let now_ms = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_millis();
-
-            // Purge old effects.
-            for i in (0..self.playing_ff_effects.len()).rev() {
-                if self.playing_ff_effects[i].1 < now_ms {
-                    self.playing_ff_effects.swap_remove(i);
-                }
-            }
-
-            let gilrs_gamepad_id = self.gilrs_gamepad_ids[gamepad_id.0 as usize];
-            let gilrs_gamepad_id: gilrs::GamepadId =
-                unsafe { std::mem::transmute(gilrs_gamepad_id) };
-
-            let play_for = gilrs::ff::Ticks::from_ms(duration_ms);
-            let after = gilrs::ff::Ticks::from_ms(start_delay_ms);
-            let scheduling = gilrs::ff::Replay {
-                play_for,
-                after,
-                ..Default::default()
-            };
-
-            let strong_magnitude = (f32::from(u16::MAX) * strong_magnitude).round() as u16;
-            let weak_magnitude = (f32::from(u16::MAX) * weak_magnitude).round() as u16;
-
-            if let Ok(effect) = gilrs::ff::EffectBuilder::new()
-                .add_effect(gilrs::ff::BaseEffect {
-                    kind: gilrs::ff::BaseEffectType::Strong {
-                        magnitude: strong_magnitude,
-                    },
-                    scheduling,
-                    ..Default::default()
-                })
-                .add_effect(gilrs::ff::BaseEffect {
-                    kind: gilrs::ff::BaseEffectType::Weak {
-                        magnitude: weak_magnitude,
-                    },
-                    scheduling,
-                    ..Default::default()
-                })
-                .repeat(gilrs::ff::Repeat::For(play_for + after))
-                .gamepads(&[gilrs_gamepad_id])
-                .finish(&mut self.gilrs_instance)
-            {
-                if effect.play().is_ok() {
-                    // Effects stop playing in drop(), so keep a reference.
-                    let throw_away_at =
-                        now_ms + u128::from(duration_ms) + u128::from(start_delay_ms);
-                    self.playing_ff_effects.push((effect, throw_away_at));
-                }
-            }
+            self.rumble_gilrs(
+                gamepad_id,
+                duration_ms,
+                start_delay_ms,
+                strong_magnitude,
+                weak_magnitude,
+            );
         }
     }
 
@@ -508,79 +411,7 @@ impl Gamepads {
     pub fn poll(&mut self) {
         #[cfg(not(target_family = "wasm"))]
         {
-            for gamepad in self.gamepads.iter_mut() {
-                gamepad.just_pressed_bits = 0;
-            }
-
-            while let Some(gilrs::Event { id, event, .. }) = self.gilrs_instance.next_event() {
-                match event {
-                    gilrs::EventType::Connected => {
-                        if let Some(gamepad_idx) = self.find_or_insert(id) {
-                            self.gamepads[gamepad_idx].connected = true;
-
-                            for (zone, axis) in [
-                                (0, gilrs::Axis::LeftStickX),
-                                (1, gilrs::Axis::LeftStickY),
-                                (2, gilrs::Axis::RightStickY),
-                                (3, gilrs::Axis::RightStickY),
-                            ] {
-                                if let Some(code) = self.gilrs_instance.gamepad(id).axis_code(axis)
-                                {
-                                    self.deadzones[gamepad_idx][zone] = self
-                                        .gilrs_instance
-                                        .gamepad(id)
-                                        .deadzone(code)
-                                        .unwrap_or_default();
-                                }
-                            }
-                        }
-                    }
-                    gilrs::EventType::Disconnected => {
-                        if let Some(gamepad_idx) = self.find_or_insert(id) {
-                            self.gamepads[gamepad_idx].connected = false;
-                        }
-                    }
-                    gilrs::EventType::ButtonPressed(button, _code) => {
-                        if let Some(gamepad_idx) = self.find_or_insert(id) {
-                            if let Some(b) = Button::from_gilrs(button) {
-                                let bit = 1 << (b as u32);
-                                self.gamepads[gamepad_idx].pressed_bits |= bit;
-                                self.gamepads[gamepad_idx].just_pressed_bits |= bit;
-                            }
-                        }
-                    }
-                    gilrs::EventType::ButtonReleased(button, _code) => {
-                        if let Some(gamepad_idx) = self.find_or_insert(id) {
-                            if let Some(b) = Button::from_gilrs(button) {
-                                let bit = 1 << (b as u32);
-                                self.gamepads[gamepad_idx].pressed_bits &= !bit;
-                            }
-                        }
-                    }
-                    gilrs::EventType::AxisChanged(axis, value, _code) => {
-                        if let Some(gamepad_idx) = self.find_or_insert(id) {
-                            if let Some(axis_idx) = match axis {
-                                gilrs::Axis::LeftStickX => Some(0),
-                                gilrs::Axis::LeftStickY => Some(1),
-                                gilrs::Axis::RightStickX => Some(2),
-                                gilrs::Axis::RightStickY => Some(3),
-                                _ => None,
-                            } {
-                                let deadzone = self.deadzones[gamepad_idx][axis_idx];
-                                self.gamepads[gamepad_idx].axes[axis_idx] =
-                                    if value.abs() < deadzone {
-                                        // Axis values within deadzone are 0:
-                                        0.
-                                    } else {
-                                        // Adjust so that interval of magnitude is [0.0, 1.0]:
-                                        value.signum().mul_add(-deadzone, value) / (1. - deadzone)
-                                    };
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
+            self.poll_gilrs();
         }
         #[cfg(target_family = "wasm")]
         {
@@ -590,39 +421,11 @@ impl Gamepads {
             #[cfg(not(feature = "wasm-bindgen"))]
             {
                 let pointer = self.gamepads.as_ptr();
-                unsafe { getGamepads(pointer) }
+                unsafe { backend_web_direct::getGamepads(pointer) }
             }
             #[cfg(feature = "wasm-bindgen")]
             {
-                #![allow(clippy::expect_used)]
-                for gamepad in web_sys::window()
-                    .expect("Unable to get window")
-                    .navigator()
-                    .get_gamepads()
-                    .expect("Unable to get gamepads")
-                    .iter()
-                    .filter(|v| !v.is_null())
-                {
-                    let gamepad = web_sys::Gamepad::from(gamepad);
-                    let mut pressed_bits: u32 = 0;
-                    for (button_idx, button) in gamepad.buttons().iter().enumerate() {
-                        let button = web_sys::GamepadButton::from(button);
-                        if button.pressed() {
-                            pressed_bits |= 1 << (button_idx as u32);
-                        }
-                    }
-                    self.gamepads[gamepad.index() as usize].pressed_bits = pressed_bits;
-                    self.gamepads[gamepad.index() as usize].connected = gamepad.connected();
-                    for (axes_idx, axes_value) in gamepad
-                        .axes()
-                        .iter()
-                        .map(|a| a.as_f64().expect("axes should be numbers"))
-                        .enumerate()
-                    {
-                        self.gamepads[gamepad.index() as usize].axes[axes_idx] =
-                            axes_value as f32 * if axes_idx % 2 == 1 { -1. } else { 1. };
-                    }
-                }
+                backend_web_bindgen::poll(self);
             }
         }
     }
@@ -742,6 +545,7 @@ pub enum Button {
 }
 
 impl Button {
+    /// An iterator over all button types.
     pub fn all() -> impl Iterator<Item = Self> {
         [
             Self::ActionDown,
@@ -763,32 +567,5 @@ impl Button {
             Self::Mode,
         ]
         .into_iter()
-    }
-
-    #[cfg(not(target_family = "wasm"))]
-    const fn from_gilrs(button: gilrs::Button) -> Option<Self> {
-        Some(match button {
-            gilrs::Button::South => Self::ActionDown,
-            gilrs::Button::East => Self::ActionRight,
-            gilrs::Button::West => Self::ActionLeft,
-            gilrs::Button::North => Self::ActionUp,
-            gilrs::Button::LeftTrigger => Self::FrontLeftUpper,
-            gilrs::Button::RightTrigger => Self::FrontRightUpper,
-            gilrs::Button::LeftTrigger2 => Self::FrontLeftLower,
-            gilrs::Button::RightTrigger2 => Self::FrontRightLower,
-            gilrs::Button::Select => Self::LeftCenterCluster,
-            gilrs::Button::Start => Self::RightCenterCluster,
-            gilrs::Button::LeftThumb => Self::LeftStick,
-            gilrs::Button::RightThumb => Self::RightStick,
-            gilrs::Button::DPadUp => Self::DPadUp,
-            gilrs::Button::DPadDown => Self::DPadDown,
-            gilrs::Button::DPadLeft => Self::DPadLeft,
-            gilrs::Button::DPadRight => Self::DPadRight,
-            gilrs::Button::Mode => Self::Mode,
-            // Other:
-            _ => {
-                return None;
-            }
-        })
     }
 }

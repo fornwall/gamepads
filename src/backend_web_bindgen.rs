@@ -58,3 +58,35 @@ pub fn play_effect(
         }
     }
 }
+
+pub fn poll(gamepads: &mut crate::Gamepads) {
+    #![allow(clippy::expect_used)]
+    for gamepad in web_sys::window()
+        .expect("Unable to get window")
+        .navigator()
+        .get_gamepads()
+        .expect("Unable to get gamepads")
+        .iter()
+        .filter(|v| !v.is_null())
+    {
+        let gamepad = web_sys::Gamepad::from(gamepad);
+        let mut pressed_bits: u32 = 0;
+        for (button_idx, button) in gamepad.buttons().iter().enumerate() {
+            let button = web_sys::GamepadButton::from(button);
+            if button.pressed() {
+                pressed_bits |= 1 << (button_idx as u32);
+            }
+        }
+        gamepads.gamepads[gamepad.index() as usize].pressed_bits = pressed_bits;
+        gamepads.gamepads[gamepad.index() as usize].connected = gamepad.connected();
+        for (axes_idx, axes_value) in gamepad
+            .axes()
+            .iter()
+            .map(|a| a.as_f64().expect("axes should be numbers"))
+            .enumerate()
+        {
+            gamepads.gamepads[gamepad.index() as usize].axes[axes_idx] =
+                axes_value as f32 * if axes_idx % 2 == 1 { -1. } else { 1. };
+        }
+    }
+}
