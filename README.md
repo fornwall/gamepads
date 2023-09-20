@@ -3,7 +3,7 @@
 [![Crates.io version](https://img.shields.io/crates/v/gamepads.svg)](https://crates.io/crates/gamepads)
 
 # gamepads
-Rust gamepad input library with a focus on ease of use.
+Rust gamepad input library with a focus on ease of use. Supports haptic feedback (dual rumble / vibrations) on the web, and can be used as a [macroquad plugin](https://github.com/fornwall/gamepads#how-to-use-as-a-macroquad-plugin).
 
 ```rust
 use gamepads::Gamepads;
