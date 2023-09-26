@@ -116,42 +116,13 @@ impl crate::Gamepads {
     #[allow(clippy::expect_used)]
     pub fn rumble_android(
         &mut self,
-        gamepad_id: crate::GamepadId,
+        _gamepad_id: crate::GamepadId,
         duration_ms: u32,
         _start_delay_ms: u32,
         strong_magnitude: f32,
         weak_magnitude: f32,
     ) {
-        // TODO: get InputDevice (https://developer.android.com/reference/android/view/InputDevice)
-        //       from the device id using https://developer.android.com/reference/android/view/InputDevice#getDevice(int)
-        //       Then get VibratorManager (https://developer.android.com/reference/android/os/VibratorManager)
-        //       using https://developer.android.com/reference/android/view/InputDevice#getVibratorManager()
-        //
         // See https://android.googlesource.com/platform/frameworks/opt/gamesdk/+/refs/heads/main/games-controller/src/main/java/com/google/android/games/paddleboat/GameControllerManager.java
-        //             if (vibratorManager != null) {
-        // int[] vibratorIds = vibratorManager.getVibratorIds();
-        // int vibratorCount = vibratorIds.length;
-        // Log.d(TAG, "Vibrator Count: " + vibratorCount);
-        // if (vibratorCount > 0) {
-        // We have an assumption that game controllers have two vibrators
-        // corresponding to a left motor and a right motor, and the left
-        // motor will be first.
-        // updateVibrator(vibratorManager.getVibrator(vibratorIds[0]), leftIntensity, leftDuration);
-        // if (vibratorCount > 1) {
-        // updateVibrator(vibratorManager.getVibrator(vibratorIds[1]), rightIntensity, rightDuration);
-        // }
-        // }
-        // }
-        //
-        // where
-        //     private void updateVibrator(Vibrator vibrator, int intensity, int duration) {
-        // if (vibrator != null) {
-        // if (intensity == 0) {
-        // vibrator.cancel();
-        // } else if (duration > 0) {
-        // vibrator.vibrate(VibrationEffect.createOneShot((long) duration, intensity));
-        // }
-        // }
         //
         // See also implementation in chromium:
         // https://chromium-review.googlesource.com/c/chromium/src/+/3721715/12/device/gamepad/android/java/src/org/chromium/device/gamepad/GamepadDevice.java#73
@@ -172,8 +143,8 @@ impl crate::Gamepads {
             .find_class("android/view/InputDevice")
             .expect("Failed to load the target class");
 
-        let device_id = self.android_winit_gamepad_ids[gamepad_id.value() as usize];
-        let device_id_i32 = unsafe { std::mem::transmute(device_id) };
+        // let device_id = self.android_winit_gamepad_ids[gamepad_id.value() as usize];
+        let device_id_i32 = 0; /* TODO: expose API in winit, or for now: unsafe { std::mem::transmute(device_id) }; */
 
         let java_input_device = if let jni::objects::JValueGen::Object(java_input_device) = env
             .call_static_method(
