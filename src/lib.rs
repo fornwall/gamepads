@@ -294,6 +294,8 @@ pub struct Gamepads {
     android_winit_gamepad_ids: [winit::event::DeviceId; MAX_GAMEPADS],
     #[cfg(all(target_os = "android", feature = "android-winit"))]
     num_connected_pads: u8,
+    #[cfg(all(target_os = "android", feature = "android-winit"))]
+    just_polled: bool,
 
     // gilrs backend:
     #[cfg(not(any(target_family = "wasm", target_os = "android")))]
@@ -332,6 +334,8 @@ impl Gamepads {
             android_winit_gamepad_ids: [unsafe { winit::event::DeviceId::dummy() }; MAX_GAMEPADS],
             #[cfg(all(target_os = "android", feature = "android-winit"))]
             num_connected_pads: 0,
+            #[cfg(all(target_os = "android", feature = "android-winit"))]
+            just_polled: false,
 
             // gilrs backend:
             #[cfg(not(any(target_family = "wasm", target_os = "android")))]
@@ -440,7 +444,10 @@ impl Gamepads {
     ///
     /// Should be called on each tick before reading gamepad state.
     pub fn poll(&mut self) {
-        #[cfg(not(target_family = "wasm"))]
+        #[cfg(target_os = "android")]
+        {
+            self.poll_android_winit();
+        }
         #[cfg(not(any(target_family = "wasm", target_os = "android")))]
         {
             self.poll_gilrs();

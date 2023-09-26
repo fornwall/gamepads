@@ -4,6 +4,13 @@ use winit::keyboard::{Key, NativeKey};
 
 impl crate::Gamepads {
     pub fn on_event<T>(&mut self, event: &Event<T>) {
+        if self.just_polled {
+            self.just_polled = false;
+            for gamepad in self.gamepads.iter_mut() {
+                gamepad.just_pressed_bits = 0;
+            }
+        }
+
         if let Event::WindowEvent {
             event: ref window_event,
             ..
@@ -113,8 +120,12 @@ impl crate::Gamepads {
         }
     }
 
+    pub(crate) fn poll_android_winit(&mut self) {
+        self.just_polled = true;
+    }
+
     #[allow(clippy::expect_used)]
-    pub fn rumble_android(
+    pub(crate) fn rumble_android(
         &mut self,
         _gamepad_id: crate::GamepadId,
         duration_ms: u32,
