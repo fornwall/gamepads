@@ -138,7 +138,9 @@
 //! }
 //! ```
 
-#[cfg(not(target_family = "wasm"))]
+#[cfg(all(target_os = "android", feature = "android-winit"))]
+mod backend_android_winit;
+#[cfg(not(any(target_family = "wasm", target_os = "android")))]
 mod backend_gilrs;
 #[cfg(all(target_family = "wasm", feature = "wasm-bindgen"))]
 mod backend_web_bindgen;
@@ -286,15 +288,23 @@ impl GamepadId {
 /// to get a gamepad by id.
 pub struct Gamepads {
     gamepads: [Gamepad; MAX_GAMEPADS],
-    #[cfg(not(target_family = "wasm"))]
-    gilrs_gamepad_ids: [usize; MAX_GAMEPADS],
-    #[cfg(not(target_family = "wasm"))]
-    gilrs_instance: gilrs::Gilrs,
-    #[cfg(not(target_family = "wasm"))]
+
+    // android winit backend:
+    #[cfg(all(target_os = "android", feature = "android-winit"))]
+    android_winit_gamepad_ids: [winit::event::DeviceId; MAX_GAMEPADS],
+    #[cfg(all(target_os = "android", feature = "android-winit"))]
     num_connected_pads: u8,
-    #[cfg(not(target_family = "wasm"))]
+
+    // gilrs backend:
+    #[cfg(not(any(target_family = "wasm", target_os = "android")))]
+    gilrs_gamepad_ids: [usize; MAX_GAMEPADS],
+    #[cfg(not(any(target_family = "wasm", target_os = "android")))]
+    gilrs_instance: gilrs::Gilrs,
+    #[cfg(not(any(target_family = "wasm", target_os = "android")))]
+    num_connected_pads: u8,
+    #[cfg(not(any(target_family = "wasm", target_os = "android")))]
     deadzones: [[f32; 4]; MAX_GAMEPADS],
-    #[cfg(not(target_family = "wasm"))]
+    #[cfg(not(any(target_family = "wasm", target_os = "android")))]
     playing_ff_effects: Vec<(gilrs::ff::Effect, u128)>,
 }
 
@@ -302,6 +312,9 @@ impl Gamepads {
     /// Construct a new gamepads instance.
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
+        #[cfg(target_os = "android")]
+        android_logger::Config::default().with_max_level(log::LevelFilter::Warn);
+
         let mut gamepads = Self {
             gamepads: std::array::from_fn(|idx| Gamepad {
                 id: GamepadId(idx as u8),
@@ -313,21 +326,29 @@ impl Gamepads {
                 #[cfg(not(target_family = "wasm"))]
                 just_pressed_bits: 0,
             }),
-            #[cfg(not(target_family = "wasm"))]
-            gilrs_gamepad_ids: [usize::MAX; MAX_GAMEPADS],
-            #[cfg(not(target_family = "wasm"))]
-            gilrs_instance: gilrs::Gilrs::new().unwrap(),
-            #[cfg(not(target_family = "wasm"))]
+
+            // android backend:
+            #[cfg(all(target_os = "android", feature = "android-winit"))]
+            android_winit_gamepad_ids: [unsafe { winit::event::DeviceId::dummy() }; MAX_GAMEPADS],
+            #[cfg(all(target_os = "android", feature = "android-winit"))]
             num_connected_pads: 0,
-            #[cfg(not(target_family = "wasm"))]
+
+            // gilrs backend:
+            #[cfg(not(any(target_family = "wasm", target_os = "android")))]
+            gilrs_gamepad_ids: [usize::MAX; MAX_GAMEPADS],
+            #[cfg(not(any(target_family = "wasm", target_os = "android")))]
+            gilrs_instance: gilrs::Gilrs::new().unwrap(),
+            #[cfg(not(any(target_family = "wasm", target_os = "android")))]
+            num_connected_pads: 0,
+            #[cfg(not(any(target_family = "wasm", target_os = "android")))]
             deadzones: [[0.; 4]; MAX_GAMEPADS],
-            #[cfg(not(target_family = "wasm"))]
+            #[cfg(not(any(target_family = "wasm", target_os = "android")))]
             playing_ff_effects: Vec::new(),
         };
 
         gamepads.poll();
 
-        #[cfg(not(target_family = "wasm"))]
+        #[cfg(not(any(target_family = "wasm", target_os = "android")))]
         gamepads.setup_initially_connected_gilrs();
 
         gamepads
@@ -393,9 +414,19 @@ impl Gamepads {
                 weak_magnitude,
             );
         }
-        #[cfg(not(target_family = "wasm"))]
+        #[cfg(not(any(target_family = "wasm", target_os = "android")))]
         {
             self.rumble_gilrs(
+                gamepad_id,
+                duration_ms,
+                start_delay_ms,
+                strong_magnitude,
+                weak_magnitude,
+            );
+        }
+        #[cfg(all(target_os = "android", feature = "android-winit"))]
+        {
+            self.rumble_android(
                 gamepad_id,
                 duration_ms,
                 start_delay_ms,
@@ -410,6 +441,7 @@ impl Gamepads {
     /// Should be called on each tick before reading gamepad state.
     pub fn poll(&mut self) {
         #[cfg(not(target_family = "wasm"))]
+        #[cfg(not(any(target_family = "wasm", target_os = "android")))]
         {
             self.poll_gilrs();
         }

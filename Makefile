@@ -41,6 +41,7 @@ CLIPPY_PARAMS = -- \
 check:
 	cargo fmt --check
 	cargo clippy $(CLIPPY_PARAMS) --no-deps
+	cargo clippy --target aarch64-linux-android --all-features $(CLIPPY_PARAMS) --no-deps
 	cargo clippy --target wasm32-unknown-unknown $(CLIPPY_PARAMS) --no-deps
 	cargo clippy --target wasm32-unknown-unknown --all-features $(CLIPPY_PARAMS) --no-deps
 	cd examples/hello-gamepads && make

@@ -12,10 +12,12 @@ version = "0.1.6"
 crate-type = ["cdylib", "rlib"]
 
 [features]
-default = [ "wasm-bindgen" ]
+android-winit = ["winit", "jni", "ndk-context"]
+default = ["wasm-bindgen"]
 wasm-bindgen = ["dep:wasm-bindgen", "web-sys", "js-sys"]
 
 [dependencies]
+# feature: wasm-bindgen
 js-sys = { version = "0.3", optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
 web-sys = { version = "0.3", features = [
@@ -25,9 +27,19 @@ web-sys = { version = "0.3", features = [
     "Window",
     "Navigator",
 ], optional = true }
+# feature: android-winit
+winit = { path = "../winit-fork", features = [
+    "android-native-activity",
+], optional = true }
+jni = { version = "0", optional = true }
+ndk-context = { version = "0", optional = true }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 gilrs = "0.10"
+
+[target.'cfg(target_os = "android")'.dependencies]
+android_logger = "0"
+log = "0"
 
 [workspace]
 members = [".", "examples/*"]
