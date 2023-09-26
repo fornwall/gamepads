@@ -16,7 +16,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
-          targets: wasm32-unknown-unknown
+          targets: wasm32-unknown-unknown aarch64-linux-android
       - run: sudo apt-get update && sudo apt-get install libasound2-dev libudev-dev
         if: matrix.os == 'ubuntu'
       - run: make
