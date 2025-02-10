@@ -1,6 +1,6 @@
 function registerHostFunctions(importObject, wasm_memory_holder) {
   const MAX_GAMEPADS = 8;
-  const BYTES_PER_GAMEPAD = 28;
+  const BYTES_PER_GAMEPAD = 36;
 
   // How should deadzones be handled in browsers?
   // See e.g. https://github.com/ensemblejs/gamepad-api-mappings
@@ -49,12 +49,21 @@ function registerHostFunctions(importObject, wasm_memory_holder) {
       u32[byteOffset / 4] = pressed_bits;
       byteOffset += 4;
 
-      for (const [index, axes] of gamepad.axes.slice(0, 4).entries()) {
-        const sign = index === 1 || index === 3 ? -1 : 1;
-        f32[byteOffset / 4] =
-          Math.abs(axes) < DEADZONE
-            ? 0.0
-            : (sign * (axes - Math.sign(axes) * DEADZONE)) / (1 - DEADZONE);
+      for (const [index, axes] of gamepad.axes.slice(0, 6).entries()) {
+        if (index < 4) {
+          // Joysticks
+          const sign = index === 1 || index === 3 ? -1 : 1;
+          f32[byteOffset / 4] =
+            Math.abs(axes) < DEADZONE
+              ? 0.0
+              : (sign * (axes - Math.sign(axes) * DEADZONE)) / (1 - DEADZONE);
+        } else {
+          // Triggers
+          f32[byteOffset / 4] = 
+            Math.abs(axes) + 1 < DEADZONE
+              ? 0.0
+              : (axes + 1) * 0.5;
+        }
         byteOffset += 4;
       }
     }
