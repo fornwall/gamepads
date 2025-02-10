@@ -159,6 +159,8 @@ const MAX_GAMEPADS: usize = 8;
 pub struct Gamepad {
     id: GamepadId,
     connected: bool,
+    button_count: u8,
+    axes_count: u8,
     pressed_bits: u32,
     axes: [f32; 4],
     #[cfg(target_family = "wasm")]
@@ -180,6 +182,14 @@ impl Gamepad {
     /// and reconnected will retain the same id.
     pub const fn id(&self) -> GamepadId {
         self.id
+    }
+
+    pub const fn button_count(&self) -> usize {
+        self.button_count as usize
+    }
+
+    pub const fn axes_count(&self) -> usize {
+        self.axes_count as usize
     }
 
     /// The `(x, y)` position of the left thumbstick.
@@ -321,6 +331,8 @@ impl Gamepads {
             gamepads: std::array::from_fn(|idx| Gamepad {
                 id: GamepadId(idx as u8),
                 connected: false,
+                button_count: 0,
+                axes_count: 0,
                 pressed_bits: 0,
                 axes: [0.; 4],
                 #[cfg(target_family = "wasm")]

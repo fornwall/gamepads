@@ -35,8 +35,11 @@ function registerHostFunctions(importObject, wasm_memory_holder) {
       }
 
       // Mark connected.
-      u8[byteOffset] = 1;
-      byteOffset += 3;
+      u8[byteOffset++] = 1;
+
+      // Record number of buttons and axes
+      u8[byteOffset++] = gamepad.buttons.length;
+      u8[byteOffset++] = gamepad.axes.length;
 
       // Write u32, pressed_bits:
       let pressed_bits = 0;
