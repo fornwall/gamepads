@@ -59,10 +59,14 @@ function registerHostFunctions(importObject, wasm_memory_holder) {
               : (sign * (axes - Math.sign(axes) * DEADZONE)) / (1 - DEADZONE);
         } else {
           // Triggers
-          f32[byteOffset / 4] = 
-            Math.abs(axes) + 1 < DEADZONE
-              ? 0.0
-              : (axes + 1) * 0.5;
+          if (Math.abs(axes) < 0.05 && f32[byteOffset / 4] < 0.05) {
+            // Trigger has not been pressed, is in default half-way value. Ignore
+          } else {
+            f32[byteOffset / 4] =
+              Math.abs(axes) + 1 < DEADZONE
+                ? 0.0
+                : (axes + 1) * 0.5;
+          }
         }
         byteOffset += 4;
       }
