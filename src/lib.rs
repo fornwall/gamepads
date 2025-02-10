@@ -162,7 +162,7 @@ pub struct Gamepad {
     button_count: u8,
     axes_count: u8,
     pressed_bits: u32,
-    axes: [f32; 4],
+    axes: [f32; 6],
     #[cfg(target_family = "wasm")]
     last_pressed_bits: u32,
     #[cfg(not(target_family = "wasm"))]
@@ -173,7 +173,7 @@ pub struct Gamepad {
 //
 // See https://users.rust-lang.org/t/ensure-that-struct-t-has-size-n-at-compile-time/61108/3
 #[cfg(target_family = "wasm")]
-const _: () = [(); 1][(core::mem::size_of::<Gamepad>() == 28) as usize ^ 1];
+const _: () = [(); 1][(core::mem::size_of::<Gamepad>() == 36) as usize ^ 1];
 
 impl Gamepad {
     /// An id unique for each gamepad currently connected to the system.
@@ -238,6 +238,14 @@ impl Gamepad {
     /// negative values representing down.
     pub const fn right_stick_y(&self) -> f32 {
         self.axes[3]
+    }
+
+    pub const fn left_trigger(&self) -> f32 {
+        self.axes[4]
+    }
+
+    pub const fn right_trigger(&self) -> f32 {
+        self.axes[5]
     }
 
     /// An iterator over all currently pressed buttons.
@@ -334,7 +342,7 @@ impl Gamepads {
                 button_count: 0,
                 axes_count: 0,
                 pressed_bits: 0,
-                axes: [0.; 4],
+                axes: [0.; 6],
                 #[cfg(target_family = "wasm")]
                 last_pressed_bits: 0,
                 #[cfg(not(target_family = "wasm"))]
