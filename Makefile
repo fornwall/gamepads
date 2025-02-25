@@ -36,7 +36,8 @@ CLIPPY_PARAMS = -- \
 	-W clippy::unreadable-literal \
 	-W clippy::unseparated-literal-suffix \
 	-A clippy::needless-doctest-main \
-	-D warnings
+	-D warnings \
+	-A clippy::multiple_crate_versions
 
 check:
 	cargo fmt --check
