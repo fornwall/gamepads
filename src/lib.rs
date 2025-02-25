@@ -351,7 +351,7 @@ impl Gamepads {
 
             // android backend:
             #[cfg(all(target_os = "android", feature = "android-winit"))]
-            android_winit_gamepad_ids: [unsafe { winit::event::DeviceId::dummy() }; MAX_GAMEPADS],
+            android_winit_gamepad_ids: [winit::event::DeviceId::dummy(); MAX_GAMEPADS],
             #[cfg(all(target_os = "android", feature = "android-winit"))]
             num_connected_pads: 0,
             #[cfg(all(target_os = "android", feature = "android-winit"))]

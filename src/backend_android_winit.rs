@@ -67,6 +67,7 @@ impl crate::Gamepads {
                         }
                     }
                 }
+                /*
                 WindowEvent::AxisUpdate { device_id, values } => {
                     log::error!("Axis update: {:?}, {:?}", device_id, values);
                     if let Some(gamepad_idx) = self.find_or_insert(*device_id) {
@@ -94,6 +95,7 @@ impl crate::Gamepads {
                             [values[2], values[3], values[4], values[5]];
                     }
                 }
+                */
                 WindowEvent::Touch(touch) => {
                     // https://docs.rs/winit/latest/winit/event/struct.Touch.html
                     // Note device_id being present.
@@ -126,7 +128,7 @@ impl crate::Gamepads {
 
     #[allow(clippy::expect_used)]
     pub(crate) fn rumble_android(
-        &mut self,
+        &self,
         _gamepad_id: crate::GamepadId,
         duration_ms: u32,
         _start_delay_ms: u32,
