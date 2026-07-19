@@ -1,5 +1,6 @@
 use crate::Gamepad;
 
+#[link(wasm_import_module = "env")]
 extern "C" {
     // Host javascript function.
     pub fn getGamepads(data_ptr: *const Gamepad);
